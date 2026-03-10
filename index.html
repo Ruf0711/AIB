@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>MNIST Denoising Autoencoder</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-vis@1.5.1/dist/tfjs-vis.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#c9d1d9;font-family:'Courier New',monospace;font-size:13px}
+
+/* header */
+header{background:#161b22;border-bottom:1px solid #30363d;padding:14px 24px;
+  display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:50}
+header h1{font-size:18px;font-weight:700;color:#58a6ff;letter-spacing:1px}
+header span{font-size:11px;color:#8b949e;border-left:1px solid #30363d;padding-left:14px}
+
+/* layout */
+.wrap{display:grid;grid-template-columns:280px 1fr;min-height:calc(100vh - 49px)}
+.side{background:#161b22;border-right:1px solid #30363d;padding:16px;
+  display:flex;flex-direction:column;gap:12px;overflow-y:auto}
+.body{padding:20px;display:flex;flex-direction:column;gap:16px;overflow-y:auto}
+
+/* card */
+.card{background:#161b22;border:1px solid #30363d;border-radius:6px;overflow:hidden}
+.card-head{padding:8px 14px;border-bottom:1px solid #30363d;font-size:11px;
+  font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#8b949e;
+  display:flex;align-items:center;gap:8px}
+.card-head .dot{width:8px;height:8px;border-radius:50%;background:#58a6ff;flex-shrink:0}
+.card-head .dot.g{background:#3fb950}
+.card-head .dot.r{background:#f85149}
+.card-head .dot.y{background:#d29922}
+.card-body{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+
+/* labels */
+.lbl{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px}
+
+/* file input */
+.file-row{position:relative}
+.file-row input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+.file-box{display:flex;align-items:center;gap:8px;padding:8px 10px;
+  border:1px dashed #30363d;border-radius:4px;font-size:11px;color:#8b949e;cursor:pointer;
+  transition:.2s}
+.file-box:hover{border-color:#58a6ff;color:#58a6ff}
+.file-box .fn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+
+/* buttons */
+.btn{width:100%;padding:8px 12px;border-radius:4px;border:1px solid #30363d;
+  background:transparent;color:#c9d1d9;font-family:'Courier New',monospace;
+  font-size:12px;cursor:pointer;transition:.18s;display:flex;align-items:center;
+  justify-content:center;gap:6px}
+.btn:hover:not(:disabled){border-color:#58a6ff;color:#58a6ff}
+.btn:disabled{opacity:.3;cursor:not-allowed}
+.btn.blue{background:#1f6feb;border-color:#1f6feb;color:#fff;font-weight:700}
+.btn.blue:hover:not(:disabled){background:#388bfd}
+.btn.red{background:#da3633;border-color:#da3633;color:#fff;font-weight:700}
+.btn.red:hover:not(:disabled){background:#f85149}
+.btn.green{border-color:#3fb950;color:#3fb950}
+.btn.green:hover:not(:disabled){background:#3fb950;color:#000}
+.btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+/* hp grid */
+.hp{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.hp label{display:block;font-size:10px;color:#8b949e;text-transform:uppercase;
+  letter-spacing:1px;margin-bottom:3px}
+.hp input{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:4px;
+  color:#c9d1d9;font-family:'Courier New',monospace;font-size:12px;
+  padding:6px 8px;outline:none}
+.hp input:focus{border-color:#58a6ff}
+
+/* slider */
+.sl-row{display:flex;align-items:center;gap:10px}
+.sl-row input[type=range]{flex:1;accent-color:#f85149}
+.sl-val{font-size:12px;color:#f85149;min-width:34px;text-align:right}
+
+/* progress */
+.prog{height:3px;background:#21262d;border-radius:2px;overflow:hidden;margin-top:2px}
+.prog-bar{height:100%;background:#58a6ff;width:0;transition:width .3s}
+
+/* divider */
+hr{border:none;border-top:1px solid #30363d;margin:4px 0}
+
+/* status */
+#status{font-size:12px;color:#8b949e;min-height:16px}
+#status .ok{color:#3fb950}
+#status .er{color:#f85149}
+
+/* log */
+#log{background:#0d1117;border:1px solid #21262d;border-radius:4px;
+  padding:10px 12px;font-size:11px;color:#8b949e;
+  min-height:100px;max-height:180px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+
+/* accuracy */
+#acc{text-align:center;padding:10px 0}
+#acc .num{font-size:42px;font-weight:700;color:#58a6ff;font-family:'Courier New',monospace}
+#acc .sub{font-size:11px;color:#8b949e;margin-top:4px;letter-spacing:1px;text-transform:uppercase}
+
+/* badges */
+.badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
+.badge{font-size:11px;padding:3px 10px;border-radius:12px;
+  border:1px solid #30363d;color:#8b949e}
+.badge.bm{color:#58a6ff;border-color:#58a6ff}
+.badge.ba{color:#d29922;border-color:#d29922}
+
+/* ── preview grid ── */
+#preview{overflow-x:auto}
+.pg{display:grid;grid-template-columns:72px repeat(5,112px);gap:8px 12px;
+  align-items:center;min-width:620px}
+.row-lbl{font-size:11px;font-weight:700;text-align:right;padding-right:6px;
+  letter-spacing:1px;text-transform:uppercase}
+.row-lbl.rn{color:#8b949e}
+.row-lbl.rm{color:#58a6ff}
+.row-lbl.ra{color:#d29922}
+.pcell{display:flex;flex-direction:column;align-items:center;gap:4px}
+.pcell canvas{border:1px solid #30363d;border-radius:3px;image-rendering:pixelated;display:block}
+.pcell canvas.cn{border-color:#21262d}
+.pcell canvas.cm{border-color:rgba(88,166,255,.5)}
+.pcell canvas.ca{border-color:rgba(210,153,34,.5)}
+.pcell .pl{font-size:20px;font-weight:700;line-height:1;font-family:'Courier New',monospace}
+.ok{color:#3fb950}.er{color:#f85149}
+.psub{font-size:10px;color:#8b949e}
+
+/* model info */
+#minfo{font-size:11px;color:#8b949e;line-height:1.8}
+#minfo table{border-collapse:collapse;width:100%}
+#minfo td{padding:3px 8px 3px 0;vertical-align:top}
+#minfo td:first-child{color:#58a6ff;white-space:nowrap}
+
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.pulse{animation:pulse 1.4s ease-in-out infinite}
+@media(max-width:820px){.wrap{grid-template-columns:1fr}
+  .side{border-right:none;border-bottom:1px solid #30363d}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MNIST · Denoising Autoencoder</h1>
+  <span>TensorFlow.js — runs 100% in browser</span>
+</header>
+
+<div class="wrap">
+
+<!-- ═══ SIDEBAR ═══ -->
+<aside class="side">
+
+  <!-- Data -->
+  <div class="card">
+    <div class="card-head"><span class="dot"></span>Data Files</div>
+    <div class="card-body">
+      <div class="lbl">Train CSV</div>
+      <div class="file-row">
+        <input type="file" id="f-train" accept=".csv">
+        <div class="file-box">📂 <span class="fn" id="fn-train">mnist_train.csv</span></div>
+      </div>
+      <div class="lbl">Test CSV</div>
+      <div class="file-row">
+        <input type="file" id="f-test" accept=".csv">
+        <div class="file-box">📂 <span class="fn" id="fn-test">mnist_test.csv</span></div>
+      </div>
+      <button class="btn blue" id="btn-load">⬆ Load Data</button>
+      <div id="status">Select both CSV files, then click Load.</div>
+    </div>
+  </div>
+
+  <!-- Classifier -->
+  <div class="card">
+    <div class="card-head"><span class="dot"></span>CNN Classifier</div>
+    <div class="card-body">
+      <div class="hp">
+        <div><label>Epochs</label><input type="number" id="hp-ep" value="5" min="1" max="50"></div>
+        <div><label>Batch</label><input type="number" id="hp-bs" value="64" min="16" max="512"></div>
+        <div><label>Val Split</label><input type="number" id="hp-vs" value="0.1" min="0.05" max="0.3" step="0.05"></div>
+        <div><label>LR</label><input type="number" id="hp-lr" value="0.001" min="0.0001" max="0.01" step="0.0001"></div>
+      </div>
+      <button class="btn blue" id="btn-train" disabled>▶ Train Classifier</button>
+      <div class="btn-row">
+        <button class="btn" id="btn-eval" disabled>📊 Evaluate</button>
+        <button class="btn" id="btn-t5"   disabled>🎲 Test 5</button>
+      </div>
+      <div class="prog"><div class="prog-bar" id="bar-cls"></div></div>
+    </div>
+  </div>
+
+  <!-- Denoiser -->
+  <div class="card" style="border-color:rgba(248,81,73,.3)">
+    <div class="card-head"><span class="dot r"></span>Denoising Autoencoder</div>
+    <div class="card-body">
+
+      <div class="lbl">Noise Level (σ)</div>
+      <div class="sl-row">
+        <input type="range" id="sl-noise" min="0.1" max="0.8" step="0.05" value="0.3">
+        <span class="sl-val" id="sl-val">0.30</span>
+      </div>
+
+      <div class="hp" style="margin-top:4px">
+        <div><label>AE Epochs</label><input type="number" id="ae-ep" value="15" min="1" max="60"></div>
+        <div><label>AE Batch</label><input type="number" id="ae-bs" value="128" min="16" max="512"></div>
+      </div>
+
+      <button class="btn red" id="btn-ae" disabled>🔧 Train Both Denoisers</button>
+      <div class="prog"><div class="prog-bar" id="bar-ae" style="background:#f85149"></div></div>
+
+      <div class="badges">
+        <span class="badge" id="bdg-max">○ MaxPool</span>
+        <span class="badge" id="bdg-avg">○ AvgPool</span>
+      </div>
+
+      <hr>
+
+      <!-- Save denoisers -->
+      <div class="lbl">Save</div>
+      <div class="btn-row">
+        <button class="btn" id="btn-sv-max" disabled>💾 MaxPool</button>
+        <button class="btn" id="btn-sv-avg" disabled>💾 AvgPool</button>
+      </div>
+
+      <hr>
+
+      <!-- Load MaxPool -->
+      <div class="lbl">Load MaxPool .json</div>
+      <div class="file-row">
+        <input type="file" id="f-mx-json" accept=".json">
+        <div class="file-box">📄 <span class="fn" id="fn-mx-json">denoiser-max.json</span></div>
+      </div>
+      <div class="lbl">Load MaxPool .bin</div>
+      <div class="file-row">
+        <input type="file" id="f-mx-bin" accept=".bin">
+        <div class="file-box">🗜 <span class="fn" id="fn-mx-bin">denoiser-max.weights.bin</span></div>
+      </div>
+
+      <!-- Load AvgPool -->
+      <div class="lbl" style="margin-top:4px">Load AvgPool .json</div>
+      <div class="file-row">
+        <input type="file" id="f-av-json" accept=".json">
+        <div class="file-box">📄 <span class="fn" id="fn-av-json">denoiser-avg.json</span></div>
+      </div>
+      <div class="lbl">Load AvgPool .bin</div>
+      <div class="file-row">
+        <input type="file" id="f-av-bin" accept=".bin">
+        <div class="file-box">🗜 <span class="fn" id="fn-av-bin">denoiser-avg.weights.bin</span></div>
+      </div>
+
+      <button class="btn" id="btn-ld-ae" style="margin-top:4px">📥 Load Both Denoisers</button>
+    </div>
+  </div>
+
+  <!-- Classifier I/O -->
+  <div class="card">
+    <div class="card-head"><span class="dot g"></span>Classifier I/O</div>
+    <div class="card-body">
+      <button class="btn" id="btn-sv-cls" disabled>💾 Save Classifier</button>
+      <div class="lbl" style="margin-top:4px">Load .json</div>
+      <div class="file-row">
+        <input type="file" id="f-cls-json" accept=".json">
+        <div class="file-box">📄 <span class="fn" id="fn-cls-json">model.json</span></div>
+      </div>
+      <div class="lbl">Load .bin</div>
+      <div class="file-row">
+        <input type="file" id="f-cls-bin" accept=".bin">
+        <div class="file-box">🗜 <span class="fn" id="fn-cls-bin">weights.bin</span></div>
+      </div>
+      <button class="btn" id="btn-ld-cls">📥 Load Classifier</button>
+    </div>
+  </div>
+
+  <!-- Misc -->
+  <div class="card">
+    <div class="card-head"><span class="dot r"></span>Misc</div>
+    <div class="card-body">
+      <button class="btn" id="btn-visor">👁 Toggle Visor</button>
+      <button class="btn" style="border-color:#f85149;color:#f85149" id="btn-reset">↺ Reset All</button>
+    </div>
+  </div>
+
+</aside>
+
+<!-- ═══ MAIN ═══ -->
+<main class="body">
+
+  <div class="card">
+    <div class="card-head"><span class="dot pulse"></span>Log</div>
+    <div class="card-body"><div id="log">Waiting…</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="dot g"></span>Classifier Accuracy</div>
+    <div class="card-body">
+      <div id="acc"><div class="num">—</div><div class="sub">Test Accuracy</div></div>
+    </div>
+  </div>
+
+  <!-- 3-row denoising preview -->
+  <div class="card" style="border-color:rgba(248,81,73,.3)">
+    <div class="card-head">
+      <span class="dot r"></span>
+      Denoising Preview — 5 Random Images
+      <span style="margin-left:auto;font-size:10px;color:#8b949e">NOISY → MAXPOOL → AVGPOOL</span>
+    </div>
+    <div class="card-body">
+      <div id="preview">
+        <span style="color:#8b949e;font-size:12px">
+          Steps: Load Data → Train Classifier → Train Both Denoisers → Test 5
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><span class="dot"></span>Model Info</div>
+    <div class="card-body"><div id="minfo" style="color:#8b949e">No model yet.</div></div>
+  </div>
+
+</main>
+</div>
+
+<script>
+// auto-update file label text
+function wfl(fid, nid) {
+  document.getElementById(fid).addEventListener('change', function() {
+    document.getElementById(nid).textContent = this.files[0] ? this.files[0].name : '—';
+  });
+}
+wfl('f-train','fn-train'); wfl('f-test','fn-test');
+wfl('f-cls-json','fn-cls-json'); wfl('f-cls-bin','fn-cls-bin');
+wfl('f-mx-json','fn-mx-json'); wfl('f-mx-bin','fn-mx-bin');
+wfl('f-av-json','fn-av-json'); wfl('f-av-bin','fn-av-bin');
+
+const sl = document.getElementById('sl-noise');
+const sv = document.getElementById('sl-val');
+sl.addEventListener('input', () => sv.textContent = parseFloat(sl.value).toFixed(2));
+</script>
+
+<script src="data-loader.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
